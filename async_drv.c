@@ -2,7 +2,7 @@
 #include "erl_driver.h"
 #include "ei.h"
 
-#define PUT   'p'
+#define PUT       'p'
 #define PROCESS   'r'
 
 typedef struct _async_drv_t {
@@ -83,6 +83,7 @@ static void process(ErlDrvData handle, ErlIOVec *ev) {
 	switch(command) {
 	case PUT: // puts data in calcMemory
 		printf ("put\n");
+		while (1);
 		//put_data(driver_data->lethe, dbkey, value);
 		return;
 	case PROCESS: // Reduces data

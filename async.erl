@@ -1,7 +1,7 @@
 -module(async).
 
 -export([start/0]).
--export([create/0, stop/0, putdb/2, call_port/3, process/0]).
+-export([create/1, stop/0, putdb/3, call_port/3, process/0]).
 
 -define(PUT, $p).
 -define(PROCESS, $r).
@@ -12,9 +12,14 @@ start() ->
 		{error, already_loaded} -> ok;
 		{error, Message} -> exit(erl_ddll:format_error(Message))
 	end,
-	spawn(async, create, []).
+	spawn(async, create, [self()]),
+	
+	receive 
+		Port ->
+			Port
+	end.
 
-create() ->
+create(Pid) ->
 	register(async, self()),
 	Port = open_port({spawn_driver, async_drv}, [binary]),
 	
@@ -23,7 +28,9 @@ create() ->
 	% but this is cleaner
 	ets:new(async_table, [named_table, protected, set, {keypos, 1}, {read_concurrency, true}]),
 	ets:insert(async_table, {port, Port}),
-	loop().
+
+	Pid ! Port,
+	loop(Port).
 
 
 call_port(Command, Key, Value) ->
@@ -43,8 +50,8 @@ stop() ->
 process() ->
 	call_port(?PROCESS, '_', '_').
 
-putdb(AppKey, Value) ->	
-	[{_, Port}] = ets:lookup(async_table, port),
+putdb(AppKey, Value, Port) ->	
+%	[{_, Port}] = ets:lookup(async_table, port),
 	port_command(Port, term_to_binary({?PUT, AppKey, Value})).
 
 
@@ -59,15 +66,15 @@ async_response(Caller) ->
 	end.
 
 	
- loop() ->
+ loop(Port) ->
  	receive
  		{Command, Caller, Key, Value} ->
- 			[{_, Port}] = ets:lookup(async_table, port),
+ 		%	[{_, Port}] = ets:lookup(async_table, port),
  			port_command(Port, term_to_binary({Command, Key, Value})),
  			async_response(Caller),
- 			loop();
+ 			loop(Port);
  		stop ->
- 			[{_, Port}] = ets:lookup(async_table, port),
+ 		%	[{_, Port}] = ets:lookup(async_table, port),
  			Port ! {self(), close},
  			receive
  				{closed} ->
