@@ -83,7 +83,6 @@ static void process(ErlDrvData handle, ErlIOVec *ev) {
 	switch(command) {
 	case PUT: // puts data in calcMemory
 		printf ("put\n");
-		while (1);
 		//put_data(driver_data->lethe, dbkey, value);
 		return;
 	case PROCESS: // Reduces data
