@@ -1,1 +1,0 @@
-gcc -o async_drv -fpic -shared async_drv.c
