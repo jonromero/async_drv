@@ -1,0 +1,134 @@
+#include <stdlib.h>
+#include "erl_driver.h"
+#include "ei.h"
+#include "basic.h"
+#include "memmie.h"
+#include "lethe.h"
+#include "lql.h"
+#include "lethe_drv.h"
+
+#define START 's'
+#define PUT   'p'
+#define GET   'g'
+#define VIEW  'v'
+#define PROCESS   'r'
+#define DUMP  'd'
+#define LQL   'l'
+#define STOP  'o'
+
+typedef struct _lethe_drv_t {
+	ErlDrvPort port;
+	lethe_t *lethe;
+} lethe_drv_t;
+
+static ErlDrvData start(ErlDrvPort port, char* cmd);
+static void stop(ErlDrvData handle);
+static void process(ErlDrvData handle, ErlIOVec *ev);
+
+static ErlDrvEntry lethe_driver_entry = {
+    NULL,                             /* init */
+    start,
+    stop,
+    NULL,                             /* output */
+    NULL,                             /* ready_input */
+    NULL,                             /* ready_output */
+    "lethe_drv",                      /* the name of the driver */
+    NULL,                             /* finish */
+    NULL,                             /* handle */
+    NULL,                             /* control */
+    NULL,                             /* timeout */
+    process,                          /* outputv */
+    NULL,                             /* ready_async */
+    NULL,                             /* flush */
+    NULL,                             /* call */
+    NULL,                             /* event */
+    ERL_DRV_EXTENDED_MARKER,          /* ERL_DRV_EXTENDED_MARKER */
+    ERL_DRV_EXTENDED_MAJOR_VERSION,   /* ERL_DRV_EXTENDED_MAJOR_VERSION */
+    ERL_DRV_EXTENDED_MINOR_VERSION,   /* ERL_DRV_EXTENDED_MINOR_VERSION */
+    ERL_DRV_FLAG_USE_PORT_LOCKING,    /* ERL_DRV_FLAGs */
+    NULL,
+    NULL,
+    NULL
+};
+
+
+static ErlDrvData start(ErlDrvPort port, char *cmd) {
+	cmd = cmd;
+	lethe_drv_t *lethe_drv = (lethe_drv_t*)driver_alloc(sizeof(lethe_drv_t));
+	lethe_drv->port = port;
+	g_port = port;
+
+	return (ErlDrvData) lethe_drv;
+}
+
+static void stop(ErlDrvData handle) {
+	lethe_drv_t *lethe_drv = (lethe_drv_t *)handle;
+	lethe_stop(lethe_drv->lethe);
+
+	driver_free(lethe_drv);
+}
+
+static void process(ErlDrvData handle, ErlIOVec *ev) {
+	char command;
+	char dbkey[MAX_QUERY_LEN];
+	char value[MAX_QUERY_LEN];
+	lethe_drv_t* driver_data = (lethe_drv_t*) handle;
+	//ErlDrvBinary* data = ev->binv[1];
+	SysIOVec *iov = &ev->iov[1];;
+	const char *buf = &iov->iov_base[1];
+	int index = 0;
+	char result[1024] = "\0";
+
+	ei_decode_version(buf, &index, NULL);
+	/* Our marshalling spec is that we are expecting a tuple {Command, Arg1, Arg2} */
+	ei_decode_tuple_header(buf, &index, NULL);
+
+	// command
+	ei_decode_char(buf, &index, &command);
+	// key
+	ei_decode_string(buf, &index, dbkey);
+	// value
+	ei_decode_string(buf, &index, value);
+
+	//printf("dbkey %s\n", dbkey);
+	//printf("value %s\n", value);
+	//printf("Command %c\n", command);
+	char *answer;
+
+	switch(command) {
+	case START:
+		/* NOTE: 50000 is number of row per app in lethe rdm */
+		driver_data->lethe = lethe_start(atoi(dbkey), atoi(value), 50000);
+		break;
+	case PUT: // puts data in calcMemory
+		put_data(driver_data->lethe, dbkey, value);
+		return;
+	case GET: // gets data (first row) from calcMemory
+		answer = get_data(driver_data->lethe, dbkey);
+		if (answer)
+			strcpy(result, answer);
+		break;
+	case VIEW: // Returns results from the KVM (views)
+		view(driver_data->lethe, dbkey, value, result);
+		break;
+	case PROCESS: // Reduces data
+		process_data(driver_data->lethe, dbkey, result);
+		break;
+	case DUMP: // Saves to disk
+		dump(driver_data->lethe, dbkey, result);
+		break;
+	case STOP:
+		lethe_stop(driver_data->lethe);
+		break;
+	}
+
+	ErlDrvTermData spec[] = {ERL_DRV_ATOM, driver_mk_atom((char *) "ok"),
+							 ERL_DRV_STRING, (ErlDrvTermData)result, strlen(result),
+							 ERL_DRV_TUPLE, 2};
+
+	driver_output_term(driver_data->port, spec, sizeof(spec) / sizeof(spec[0]));
+}
+
+DRIVER_INIT(lethe_driver) {
+	return &lethe_driver_entry;
+}
